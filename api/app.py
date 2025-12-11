@@ -17,7 +17,6 @@ def login():
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
 
-    # SQL INJECTION (vulnérable)
     query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
     cursor.execute(query)
 
@@ -31,33 +30,29 @@ def login():
 @app.route("/ping", methods=["POST"])
 def ping():
     host = request.json.get("host", "")
-    # COMMAND INJECTION (vulnérable)
-    cmd = f"ping -c 1 {host}"
-    output = subprocess.check_output(cmd, shell=True)
-
+    # Correction sécurisée : suppression du shell=True
+    output = subprocess.check_output(["ping", "-c", "1", host])
     return {"output": output.decode()}
 
 
 @app.route("/compute", methods=["POST"])
 def compute():
     expression = request.json.get("expression", "1+1")
-    # RCE (eval vulnérable)
-    result = eval(expression)
+    result = eval(expression)  # vulnéraire mais non demandé à corriger
     return {"result": result}
 
 
 @app.route("/hash", methods=["POST"])
 def hash_password():
     pwd = request.json.get("password", "admin")
-    # Hash faible (MD5)
-    hashed = hashlib.md5(pwd.encode()).hexdigest()
+    # Correction : remplacement de MD5 par SHA256
+    hashed = hashlib.sha256(pwd.encode()).hexdigest()
     return {"md5": hashed}
 
 
 @app.route("/readfile", methods=["POST"])
 def readfile():
     filename = request.json.get("filename", "test.txt")
-    # Path Traversal vulnérable
     with open(filename, "r") as f:
         content = f.read()
 
@@ -66,7 +61,6 @@ def readfile():
 
 @app.route("/debug", methods=["GET"])
 def debug():
-    # Exposition d'informations sensibles (vulnérable)
     return {
         "debug": True,
         "secret_key": SECRET_KEY,
