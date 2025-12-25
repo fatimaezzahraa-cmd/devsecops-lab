@@ -6,7 +6,7 @@ import os
 
 app = Flask(__name__)
 
-SECRET_KEY = "dev-secret-key-12345"  # Hardcoded secret
+SECRET_KEY = "dev-secret-key-12345"  # Secret hardcodé
 
 
 @app.route("/login", methods=["POST"])
@@ -17,6 +17,7 @@ def login():
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
 
+    # ❌ Vulnérable SQL Injection
     query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
     cursor.execute(query)
 
@@ -30,29 +31,31 @@ def login():
 @app.route("/ping", methods=["POST"])
 def ping():
     host = request.json.get("host", "")
-    # Correction sécurisée : suppression du shell=True
-    output = subprocess.check_output(["ping", "-c", "1", host])
+    # ❌ Vulnérable Command Injection
+    output = subprocess.check_output(f"ping -c 1 {host}", shell=True)
     return {"output": output.decode()}
 
 
 @app.route("/compute", methods=["POST"])
 def compute():
     expression = request.json.get("expression", "1+1")
-    result = eval(expression)  # vulnéraire mais non demandé à corriger
+    # ❌ Vulnérable Code Injection
+    result = eval(expression)
     return {"result": result}
 
 
 @app.route("/hash", methods=["POST"])
 def hash_password():
     pwd = request.json.get("password", "admin")
-    # Correction : remplacement de MD5 par SHA256
-    hashed = hashlib.sha256(pwd.encode()).hexdigest()
+    # ❌ Algorithme faible (MD5)
+    hashed = hashlib.md5(pwd.encode()).hexdigest()
     return {"md5": hashed}
 
 
 @app.route("/readfile", methods=["POST"])
 def readfile():
     filename = request.json.get("filename", "test.txt")
+    # ❌ Vulnérable Path Traversal
     with open(filename, "r") as f:
         content = f.read()
 
@@ -61,6 +64,7 @@ def readfile():
 
 @app.route("/debug", methods=["GET"])
 def debug():
+    # ❌ Fuite d’informations sensibles
     return {
         "debug": True,
         "secret_key": SECRET_KEY,
@@ -74,4 +78,4 @@ def hello():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=True)
