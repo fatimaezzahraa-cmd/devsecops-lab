@@ -1,142 +1,136 @@
 from flask import Flask, request, jsonify
 import sqlite3
-import subprocess
 import hashlib
 import os
-import re
+from pathlib import Path
 
 app = Flask(__name__)
 
-# ❌ Suppression du secret hardcodé
-# Utilisation des variables d’environnement
-SECRET_KEY = os.environ.get("SECRET_KEY", "default-secret")
-app.config["SECRET_KEY"] = SECRET_KEY
+# =======================
+# 🔐 Configuration
+# =======================
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32))
+
+DATABASE = "users.db"
+SAFE_FILES_DIR = Path("files").resolve()
 
 
 # =======================
-# 🔐 Connexion sécurisée
+# 🔐 LOGIN (SQL sécurisé)
 # =======================
 @app.route("/login", methods=["POST"])
 def login():
-    data = request.get_json()
-    username = data.get("username", "")
-    password = data.get("password", "")
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
 
-    # Hash sécurisé du mot de passe (SHA-256)
-    hashed_pwd = hashlib.sha256(password.encode()).hexdigest()
+    username = data.get("username")
+    password = data.get("password")
 
-    conn = sqlite3.connect("users.db")
-    cursor = conn.cursor()
+    if not username or not password:
+        return jsonify({"error": "Missing fields"}), 400
 
-    # ✅ Requête préparée (anti SQL Injection)
-    cursor.execute(
-        "SELECT * FROM users WHERE username=? AND password=?",
-        (username, hashed_pwd)
-    )
+    hashed = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode(),
+        b"static_salt",  # en vrai → salt stocké par utilisateur
+        100_000
+    ).hex()
 
-    result = cursor.fetchone()
-    conn.close()
-
-    if result:
-        return jsonify({"status": "success", "user": username})
-
-    return jsonify({"status": "error", "message": "Invalid credentials"}), 401
-
-
-# =======================
-# 🛡️ Ping sécurisé
-# =======================
-@app.route("/ping", methods=["POST"])
-def ping():
-    host = request.json.get("host", "")
-
-    # Validation simple du hostname / IP
-    if not re.match(r"^[a-zA-Z0-9.\-]+$", host):
-        return jsonify({"error": "Invalid host"}), 400
-
-    try:
-        # ✅ Pas de shell=True
-        output = subprocess.check_output(
-            ["ping", "-c", "1", host],
-            stderr=subprocess.STDOUT,
-            timeout=3
+    with sqlite3.connect(DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM users WHERE username = ? AND password = ?",
+            (username, hashed)
         )
-        return jsonify({"output": output.decode()})
-    except subprocess.CalledProcessError:
-        return jsonify({"error": "Ping failed"}), 500
+        user = cursor.fetchone()
+
+    if user:
+        return jsonify({"status": "success"})
+
+    return jsonify({"status": "error"}), 401
 
 
 # =======================
-# 🧮 Calcul sécurisé
+# 🧮 CALCUL SÉCURISÉ (sans eval)
 # =======================
 @app.route("/compute", methods=["POST"])
 def compute():
-    expression = request.json.get("expression", "")
-
-    # ✅ Autoriser uniquement des opérations simples
-    if not re.match(r"^[0-9+\-*/(). ]+$", expression):
-        return jsonify({"error": "Invalid expression"}), 400
+    data = request.get_json(silent=True)
+    if not data or "a" not in data or "b" not in data:
+        return jsonify({"error": "Invalid input"}), 400
 
     try:
-        result = eval(expression, {"__builtins__": {}})
-        return jsonify({"result": result})
-    except Exception:
-        return jsonify({"error": "Computation error"}), 400
+        a = float(data["a"])
+        b = float(data["b"])
+    except ValueError:
+        return jsonify({"error": "Numbers only"}), 400
+
+    return jsonify({
+        "addition": a + b,
+        "multiplication": a * b
+    })
 
 
 # =======================
-# 🔑 Hash sécurisé
+# 🔑 HASH SÉCURISÉ
 # =======================
 @app.route("/hash", methods=["POST"])
 def hash_password():
-    pwd = request.json.get("password", "")
+    data = request.get_json(silent=True)
+    password = data.get("password", "")
 
-    # ✅ SHA-256 au lieu de MD5
-    hashed = hashlib.sha256(pwd.encode()).hexdigest()
-    return jsonify({"sha256": hashed})
+    hashed = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode(),
+        b"static_salt",
+        100_000
+    ).hex()
+
+    return jsonify({"hash": hashed})
 
 
 # =======================
-# 📂 Lecture de fichier sécurisée
+# 📂 LECTURE DE FICHIER SÉCURISÉE
 # =======================
 @app.route("/readfile", methods=["POST"])
 def readfile():
-    filename = request.json.get("filename", "")
+    data = request.get_json(silent=True)
+    filename = data.get("filename")
 
-    # Répertoire autorisé
-    BASE_DIR = os.path.abspath("files")
-    file_path = os.path.abspath(os.path.join(BASE_DIR, filename))
+    if not filename:
+        return jsonify({"error": "Missing filename"}), 400
 
-    # ✅ Protection contre Path Traversal
-    if not file_path.startswith(BASE_DIR):
+    requested_file = (SAFE_FILES_DIR / filename).resolve()
+
+    # 🔐 Protection Path Traversal
+    if not str(requested_file).startswith(str(SAFE_FILES_DIR)):
         return jsonify({"error": "Access denied"}), 403
 
-    if not os.path.exists(file_path):
+    if not requested_file.exists():
         return jsonify({"error": "File not found"}), 404
 
-    with open(file_path, "r") as f:
-        content = f.read()
-
-    return jsonify({"content": content})
+    return jsonify({"content": requested_file.read_text()})
 
 
 # =======================
-# 🐞 Debug sécurisé
+# 🐞 DEBUG (désactivé)
 # =======================
 @app.route("/debug", methods=["GET"])
 def debug():
-    # ❌ Plus aucune fuite sensible
     return jsonify({"debug": False})
 
 
 # =======================
-# 👋 Hello
+# 👋 HELLO
 # =======================
 @app.route("/hello", methods=["GET"])
 def hello():
-    return jsonify({"message": "Welcome to the secure DevSecOps API"})
+    return jsonify({"message": "Secure DevSecOps API"})
 
 
+# =======================
+# 🚀 RUN
+# =======================
 if __name__ == "__main__":
-    # ❌ debug=False en production
     app.run(host="0.0.0.0", port=5000, debug=False)
