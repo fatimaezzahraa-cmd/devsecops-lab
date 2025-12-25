@@ -1,55 +1,14 @@
 FROM python:3.9-slim
 
-# =========================
-# 🔐 Secure environment
-# =========================
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-# =========================
-# 📁 Work directory
-# =========================
 WORKDIR /app
+COPY api/ .
 
-# =========================
-# 👤 Non-root user
-# =========================
-RUN addgroup --system appgroup \
-    && adduser --system --ingroup appgroup --home /app appuser
-
-# =========================
-# 📦 System dependencies (minimal)
-# =========================
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc \
+# Mise à jour des paquets système et installation de Flask
+RUN apt-get update && apt-get upgrade -y \
+    && pip install --no-cache-dir flask \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# =========================
-# 📦 Python dependencies
-# =========================
-COPY requirements.txt .
-
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
-
-# =========================
-# 📂 Application source
-# =========================
-COPY . .
-
-# =========================
-# 🔐 Permissions
-# =========================
-RUN chown -R appuser:appgroup /app
-
-USER appuser
-
-# =========================
-# 🌐 Exposed port
-# =========================
 EXPOSE 5000
-
-# =========================
-# 🚀 Run application
-# =========================
 CMD ["python", "app.py"]
+
