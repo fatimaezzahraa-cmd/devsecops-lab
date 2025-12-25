@@ -6,7 +6,7 @@ import os
 
 app = Flask(__name__)
 
-SECRET_KEY = "dev-secret-key-12345"  # Secret hardcodé
+SECRET_KEY = "dev-secret-key-12345"  # Hardcoded secret
 
 
 @app.route("/login", methods=["POST"])
@@ -17,7 +17,6 @@ def login():
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
 
-    # ❌ Vulnérable SQL Injection
     query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
     cursor.execute(query)
 
@@ -31,31 +30,29 @@ def login():
 @app.route("/ping", methods=["POST"])
 def ping():
     host = request.json.get("host", "")
-    # ❌ Vulnérable Command Injection
-    output = subprocess.check_output(f"ping -c 1 {host}", shell=True)
+    # Correction sécurisée : suppression du shell=True
+    output = subprocess.check_output(["ping", "-c", "1", host])
     return {"output": output.decode()}
 
 
 @app.route("/compute", methods=["POST"])
 def compute():
     expression = request.json.get("expression", "1+1")
-    # ❌ Vulnérable Code Injection
-    result = eval(expression)
+    result = eval(expression)  # vulnéraire mais non demandé à corriger
     return {"result": result}
 
 
 @app.route("/hash", methods=["POST"])
 def hash_password():
     pwd = request.json.get("password", "admin")
-    # ❌ Algorithme faible (MD5)
-    hashed = hashlib.md5(pwd.encode()).hexdigest()
+    # Correction : remplacement de MD5 par SHA256
+    hashed = hashlib.sha256(pwd.encode()).hexdigest()
     return {"md5": hashed}
 
 
 @app.route("/readfile", methods=["POST"])
 def readfile():
     filename = request.json.get("filename", "test.txt")
-    # ❌ Vulnérable Path Traversal
     with open(filename, "r") as f:
         content = f.read()
 
@@ -64,7 +61,6 @@ def readfile():
 
 @app.route("/debug", methods=["GET"])
 def debug():
-    # ❌ Fuite d’informations sensibles
     return {
         "debug": True,
         "secret_key": SECRET_KEY,
@@ -78,4 +74,4 @@ def hello():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000)
