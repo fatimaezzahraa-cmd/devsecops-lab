@@ -1,120 +1,138 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, abort
 import sqlite3
-import hashlib
 import os
 from pathlib import Path
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_wtf import CSRFProtect
 
 app = Flask(__name__)
 
 # =======================
-# 🔐 Configuration
+# 🔐 CONFIGURATION FLASK SÉCURISÉE
 # =======================
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32))
+app.config.update(
+    SECRET_KEY=os.environ.get("SECRET_KEY"),
+    JSONIFY_PRETTYPRINT_REGULAR=False,
+    MAX_CONTENT_LENGTH=1024 * 1024,  # 1MB max
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SECURE=True
+)
+
+csrf = CSRFProtect(app)
 
 DATABASE = "users.db"
 SAFE_FILES_DIR = Path("files").resolve()
 
 
 # =======================
-# 🔐 LOGIN (SQL sécurisé)
+# 🔒 HEADERS DE SÉCURITÉ
+# =======================
+@app.after_request
+def security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = "default-src 'none'"
+    return response
+
+
+# =======================
+# 🔐 LOGIN
 # =======================
 @app.route("/login", methods=["POST"])
+@csrf.exempt  # API token-based
 def login():
-    data = request.get_json(silent=True)
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
+    if not request.is_json:
+        abort(400)
 
+    data = request.get_json()
     username = data.get("username")
     password = data.get("password")
 
     if not username or not password:
-        return jsonify({"error": "Missing fields"}), 400
-
-    hashed = hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode(),
-        b"static_salt",  # en vrai → salt stocké par utilisateur
-        100_000
-    ).hex()
+        abort(400)
 
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id FROM users WHERE username = ? AND password = ?",
-            (username, hashed)
+            "SELECT password FROM users WHERE username = ?",
+            (username,)
         )
-        user = cursor.fetchone()
+        row = cursor.fetchone()
 
-    if user:
+    if not row:
+        abort(401)
+
+    if check_password_hash(row[0], password):
         return jsonify({"status": "success"})
 
-    return jsonify({"status": "error"}), 401
+    abort(401)
 
 
 # =======================
-# 🧮 CALCUL SÉCURISÉ (sans eval)
+# 🧮 COMPUTE
 # =======================
 @app.route("/compute", methods=["POST"])
+@csrf.exempt
 def compute():
-    data = request.get_json(silent=True)
-    if not data or "a" not in data or "b" not in data:
-        return jsonify({"error": "Invalid input"}), 400
+    if not request.is_json:
+        abort(400)
+
+    data = request.get_json()
 
     try:
         a = float(data["a"])
         b = float(data["b"])
-    except ValueError:
-        return jsonify({"error": "Numbers only"}), 400
+    except Exception:
+        abort(400)
+
+    return jsonify({"addition": a + b, "multiplication": a * b})
+
+
+# =======================
+# 🔑 HASH
+# =======================
+@app.route("/hash", methods=["POST"])
+@csrf.exempt
+def hash_password():
+    if not request.is_json:
+        abort(400)
+
+    password = request.json.get("password")
+    if not password:
+        abort(400)
 
     return jsonify({
-        "addition": a + b,
-        "multiplication": a * b
+        "hash": generate_password_hash(password)
     })
 
 
 # =======================
-# 🔑 HASH SÉCURISÉ
-# =======================
-@app.route("/hash", methods=["POST"])
-def hash_password():
-    data = request.get_json(silent=True)
-    password = data.get("password", "")
-
-    hashed = hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode(),
-        b"static_salt",
-        100_000
-    ).hex()
-
-    return jsonify({"hash": hashed})
-
-
-# =======================
-# 📂 LECTURE DE FICHIER SÉCURISÉE
+# 📂 READ FILE
 # =======================
 @app.route("/readfile", methods=["POST"])
+@csrf.exempt
 def readfile():
-    data = request.get_json(silent=True)
-    filename = data.get("filename")
+    if not request.is_json:
+        abort(400)
 
+    filename = request.json.get("filename")
     if not filename:
-        return jsonify({"error": "Missing filename"}), 400
+        abort(400)
 
     requested_file = (SAFE_FILES_DIR / filename).resolve()
 
-    # 🔐 Protection Path Traversal
-    if not str(requested_file).startswith(str(SAFE_FILES_DIR)):
-        return jsonify({"error": "Access denied"}), 403
+    if SAFE_FILES_DIR not in requested_file.parents or not requested_file.is_file():
+        abort(403)
 
-    if not requested_file.exists():
-        return jsonify({"error": "File not found"}), 404
-
-    return jsonify({"content": requested_file.read_text()})
+    return jsonify({
+        "content": requested_file.read_text(encoding="utf-8", errors="ignore")
+    })
 
 
 # =======================
-# 🐞 DEBUG (désactivé)
+# 🐞 DEBUG
 # =======================
 @app.route("/debug", methods=["GET"])
 def debug():
@@ -133,4 +151,4 @@ def hello():
 # 🚀 RUN
 # =======================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=5000, debug=False)
