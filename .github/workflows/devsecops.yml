@@ -3,6 +3,8 @@ name: DevSecOps Pipeline
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 permissions:
   contents: read
@@ -14,50 +16,76 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      ############################################
+      # 0. Checkout
+      ############################################
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
       ############################################
-      # 1. Analyse SAST CodeQL
+      # 1. Setup Python
       ############################################
-      - name: Init CodeQL
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      ############################################
+      # 2. SAST CodeQL
+      ############################################
+      - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: python
 
-      - name: Run CodeQL
+      - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
       ############################################
-      # 2. Analyse sécurité Python avec Bandit
+      # 3. SAST Python – Bandit
       ############################################
       - name: Install Bandit
         run: pip install bandit
 
-      - name: Run Bandit
-        run: bandit -r api --severity-level high
+      - name: Run Bandit scan
+        run: |
+          bandit -r api \
+          -ll \
+          -f sarif \
+          -o bandit-results.sarif
+
+      - name: Upload Bandit results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bandit-results.sarif
 
       ############################################
-      # 3. Scan des dépendances Python (Safety)
+      # 4. Dependency Scan – Safety
       ############################################
       - name: Install Safety
         run: pip install safety
 
       - name: Dependency vulnerability scan
-        run: safety check -r requirements.txt
+        env:
+          SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
+        run: |
+          safety check -r requirements.txt --full-report
 
       ############################################
-      # 4. Build Docker
+      # 5. Docker Build
       ############################################
       - name: Build Docker image
-        run: docker build -t devsecops-api ./docker
+        run: docker build -t devsecops-api .
 
       ############################################
-      # 5. Scan Docker avec Trivy
+      # 6. Container Scan – Trivy
       ############################################
-      - name: Trivy Scan
-        uses: aquasecurity/trivy-action@master
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.20.0
         with:
-          scan-type: image
           image-ref: devsecops-api
+          format: table
           severity: CRITICAL,HIGH
           exit-code: 1
+          ignore-unfixed: true
+          timeout: 5m
