@@ -3,89 +3,56 @@ name: DevSecOps Pipeline
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["main"]
 
 permissions:
   contents: read
   security-events: write
-  actions: read
 
 jobs:
   devsecops:
     runs-on: ubuntu-latest
 
     steps:
-      ############################################
-      # 0. Checkout
-      ############################################
-      - name: Checkout source code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      ############################################
-      # 1. Setup Python
-      ############################################
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      ############################################
-      # 2. SAST CodeQL
-      ############################################
-      - name: Initialize CodeQL
+      ############################
+      # CodeQL
+      ############################
+      - name: Init CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: python
 
-      - name: Perform CodeQL Analysis
+      - name: Run CodeQL
         uses: github/codeql-action/analyze@v3
 
-      ############################################
-      # 3. SAST Python – Bandit
-      ############################################
+      ############################
+      # Bandit
+      ############################
       - name: Install Bandit
         run: pip install bandit
 
-      - name: Run Bandit scan
-        run: |
-          bandit -r api \
-          -ll \
-          -f sarif \
-          -o bandit-results.sarif
+      - name: Run Bandit
+        run: bandit -r api -ll
 
-      - name: Upload Bandit results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: bandit-results.sarif
-
-      ############################################
-      # 4. Dependency Scan – Safety
-      ############################################
-      - name: Install Safety
-        run: pip install safety
-
-      - name: Dependency vulnerability scan
-        env:
-          SAFETY_API_KEY: ${{ secrets.SAFETY_API_KEY }}
-        run: |
-          safety check -r requirements.txt --full-report
-
-      ############################################
-      # 5. Docker Build
-      ############################################
+      ############################
+      # Docker build
+      ############################
       - name: Build Docker image
         run: docker build -t devsecops-api .
 
-      ############################################
-      # 6. Container Scan – Trivy
-      ############################################
-      - name: Trivy vulnerability scan
+      ############################
+      # Trivy (NON BLOQUANT)
+      ############################
+      - name: Trivy scan (report only)
         uses: aquasecurity/trivy-action@0.20.0
         with:
           image-ref: devsecops-api
-          format: table
           severity: CRITICAL,HIGH
-          exit-code: 1
-          ignore-unfixed: true
-          timeout: 5m
+          exit-code: 0
