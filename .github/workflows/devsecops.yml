@@ -33,6 +33,15 @@ jobs:
         uses: github/codeql-action/analyze@v3
 
       ############################
+      # Bandit
+      ############################
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Run Bandit
+        run: bandit -r api -ll
+
+      ############################
       # Docker build
       ############################
       - name: Build Docker image
